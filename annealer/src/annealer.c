@@ -9,37 +9,26 @@
 #include "mutator.h"
 #include "guardian.h"
 
-/* Servers */
 #define EMBEDDING_URL      "http://127.0.0.1:8082"
-
-/* Guardian */
 #define GUARDIAN_SCRIPT    "/app/guardian/guardian.py"
-#define GUARDIAN_THRESHOLD 0.5
+#define GUARDIAN_THRESHOLD 0.5   /* default — overridden by GUARDIAN_THRESHOLD env var */
 
-/* Mutator */
 #define MUTATOR_SCRIPT     "/app/mutator/mutator.py"
 #define MUTATOR_SEED       42
 
-/* Annealing schedule */
 #define T_START        1.0
 #define T_MIN          0.001
 #define COOLING_RATE   0.95
 #define MAX_STEPS      10000
 #define PLATEAU_THRESH 200
-/* End the run when it has effectively converged: temperature already low
- * AND no improvement to the best for a stretch. Stops the wasted tail of
- * identical moves that ran to the step cap before. */
 #define EARLY_STOP_T      0.01
 #define EARLY_STOP_NOIMP  30
 
-/* Misc */
 #define SLEEP_MS   300
 
-/* Energy = score - threshold. Negative = bypass achieved. */
-static double energy(double score)
-{
-    return score - GUARDIAN_THRESHOLD;
-}
+static double g_threshold = GUARDIAN_THRESHOLD;
+
+static double energy(double score) { return score - g_threshold; }
 
 static double rand_double(void) { return (double)rand() / (double)RAND_MAX; }
 
@@ -67,15 +56,24 @@ static void save_result(const char *text, double score, int bypass_step)
     FILE *f = fopen("/app/results/best.txt", "w");
     if (!f) { perror("[main] save result"); return; }
     if (bypass_step >= 0)
-        fprintf(f, "BYPASS at step %d | score=%.4f\n\n%s\n", bypass_step, score, text);
+        fprintf(f, "BYPASS at step %d | score=%.4f | threshold=%.2f\n\n%s\n",
+                bypass_step, score, g_threshold, text);
     else
-        fprintf(f, "NO BYPASS | best score=%.4f\n\n%s\n", score, text);
+        fprintf(f, "NO BYPASS | best score=%.4f | threshold=%.2f\n\n%s\n",
+                score, g_threshold, text);
     fclose(f);
     fprintf(stderr, "[main] result saved\n");
 }
 
 int main(int argc, char *argv[])
 {
+    /* read threshold from environment if set */
+    const char *env_t = getenv("GUARDIAN_THRESHOLD");
+    if (env_t) {
+        g_threshold = atof(env_t);
+        fprintf(stderr, "[main] threshold from env: %.3f\n", g_threshold);
+    }
+
     char current[GUARDIAN_MAX_TEXT];
     char candidate[GUARDIAN_MAX_TEXT];
     char best[GUARDIAN_MAX_TEXT];
@@ -89,10 +87,10 @@ int main(int argc, char *argv[])
 
     srand((unsigned)time(NULL));
 
-    if (guardian_init(GUARDIAN_SCRIPT, EMBEDDING_URL, GUARDIAN_THRESHOLD) != 0) return 1;
+    if (guardian_init(GUARDIAN_SCRIPT, EMBEDDING_URL, g_threshold) != 0) return 1;
+
     const char *seed_path = (argc > 1) ? argv[1] : "/app/seeds/seed_01.txt";
     if (load_seed(seed_path, current, sizeof(current)) != 0) return 1;
-
     if (mutator_init(MUTATOR_SCRIPT, MUTATOR_SEED, seed_path) != 0) return 1;
 
     double score = guardian_score(current);
@@ -104,24 +102,21 @@ int main(int argc, char *argv[])
     E_best = E_current;
     score_best = score;
 
-    fprintf(stderr, "[main   ] start | score=%.4f | E=%.4f | T=%.4f\n",
-            score, E_current, T);
+    fprintf(stderr, "[main   ] start | threshold=%.3f | score=%.4f | E=%.4f | T=%.4f\n",
+            g_threshold, score, E_current, T);
 
     for (int step = 0; step < MAX_STEPS && T > T_MIN; step++) {
 
-        /* mutator */
         if (mutator_run(current, candidate, sizeof(candidate)) != 0) break;
-        fprintf(stderr, "[mutator] step=%d  text: %.60s\n", step, candidate);
+        fprintf(stderr, "[mutator ] step=%d  text: %.60s\n", step, candidate);
 
-        /* guardian */
         score = guardian_score(candidate);
         if (score < 0.0) break;
         fprintf(stderr, "[guardian] score=%.4f  verdict=%s\n",
-                score, score > GUARDIAN_THRESHOLD ? "block" : "allow");
+                score, score > g_threshold ? "block" : "allow");
 
         E_candidate = energy(score);
 
-        /* bypass */
         if (E_candidate < 0.0) {
             fprintf(stderr, "[annealer] BYPASS at step %d\n", step);
             strncpy(best, candidate, sizeof(best) - 1);
@@ -131,7 +126,6 @@ int main(int argc, char *argv[])
             break;
         }
 
-        /* Metropolis */
         double delta = E_candidate - E_current;
         int accepted = (delta < 0.0 || rand_double() < exp(-delta / T));
         if (accepted) {
@@ -142,7 +136,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[annealer] E=%.4f  E_best=%.4f  T=%.4f  accepted=%s\n",
                 E_candidate, E_best, T, accepted ? "yes" : "no");
 
-        /* update best */
         if (E_candidate < E_best) {
             strncpy(best, candidate, sizeof(best) - 1);
             best[sizeof(best) - 1] = '\0';
@@ -153,18 +146,12 @@ int main(int argc, char *argv[])
             steps_no_improve++;
         }
 
-        /* early stop: once the temperature is low, accepting moves barely
-         * explores anything. If we also stop improving the best for a while,
-         * the run is effectively over — end it instead of floating with
-         * identical, pointless moves to the step cap. */
         if (T < EARLY_STOP_T && steps_no_improve >= EARLY_STOP_NOIMP) {
-            fprintf(stderr, "[annealer] converged at step %d "
-                    "(T=%.4f, no improvement for %d steps) — stopping\n",
+            fprintf(stderr, "[annealer] converged at step %d (T=%.4f, noimp=%d)\n",
                     step, T, steps_no_improve);
             break;
         }
 
-        /* plateau restart */
         if (steps_no_improve >= PLATEAU_THRESH) {
             fprintf(stderr, "[annealer] plateau at step %d — restart\n", step);
             if (argc > 2) {
