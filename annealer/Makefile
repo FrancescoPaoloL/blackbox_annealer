@@ -3,8 +3,7 @@ CFLAGS  = -Wall -Wextra -std=c11 -g -I./include
 LDFLAGS = -lcurl -lm
 
 SRC = src/annealer.c \
-      src/energy.c   \
-      src/http.c     \
+      src/guardian.c \
       src/mutator.c
 
 BIN = annealer
