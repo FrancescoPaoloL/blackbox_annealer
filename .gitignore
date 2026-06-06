@@ -1,0 +1,38 @@
+# Build artifacts
+/build/
+cmake-build-*/
+*.o
+*.a
+*.so
+
+# Models
+models/*.gguf
+models/*.bin
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Node
+node_modules/
+npm-debug.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure
+infra/azure/.terraform/
+infra/azure/*.tfstate
+infra/azure/*.tfstate.backup
+infra/azure/.terraform.lock.hcl
+
+# custom folders to ignore
+notes.txt
