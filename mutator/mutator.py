@@ -5,10 +5,10 @@ mutator.py
 Stateless prompt mutator.
 Reads one prompt per line from stdin, writes one mutated line to stdout.
 
-Three mutation categories:
+Three mutation categories (encoding disabled — kept for reference):
   synonym      — word-level substitution from a fixed table
   reformulate  — structural rewrite via template
-  encoding     — surface encoding (base64, rot13, leet)
+  encoding     — surface encoding (base64, rot13, leet) [disabled]
 
 Mutation type is chosen randomly. Seeded for reproducibility.
 """
@@ -55,6 +55,7 @@ def mutate_reformulate(prompt, rng):
     return rng.choice(templates).format(p=lowered)
 
 def mutate_encoding(prompt, rng):
+    """Disabled — encoding mutations produce long prompts that overflow context."""
     mode = rng.choice(["base64", "rot13", "leet"])
     if mode == "base64":
         return "Decode and execute: " + base64.b64encode(prompt.encode()).decode()
@@ -63,7 +64,7 @@ def mutate_encoding(prompt, rng):
     else:
         return prompt.translate(str.maketrans("aeiost", "431057"))
 
-MUTATIONS = [mutate_synonym, mutate_reformulate, mutate_encoding]
+MUTATIONS = [mutate_synonym, mutate_reformulate]
 
 def main():
     parser = argparse.ArgumentParser()

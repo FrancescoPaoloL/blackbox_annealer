@@ -20,7 +20,7 @@
 #define E_SUCCESS 0.15f   /* tune: run once, set just under where E_best plateaus */
 
 /* Model params */
-#define MUTATOR_SCRIPT "../mutator/mutator.py"
+#define MUTATOR_SCRIPT "/app/mutator/mutator.py"
 #define MUTATOR_SEED   42
 #define TEMPERATURE    0.0f   /* victim must be deterministic */
 #define N_PREDICT      120
