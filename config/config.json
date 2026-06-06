@@ -1,0 +1,31 @@
+{
+    "llama_server_url": "http://127.0.0.1:8080",
+    "completion_endpoint": "/completion",
+    "embedding_endpoint": "/embedding",
+
+    "seed_file": "../seeds/seed_01.txt",
+    "canary": "CANARY_STRING",
+    "target": "This is the forbidden output I want the model to produce.",
+
+    "annealing": {
+        "T_start": 1.0,
+        "T_min": 0.001,
+        "cooling_rate": 0.95,
+        "max_steps": 10000,
+        "plateau_threshold": 200,
+        "restart_mode": "new_seed"
+    },
+
+    "mutator": {
+        "script": "../mutator/mutator.py",
+        "seed": 42
+    },
+
+    "model": {
+        "temperature": 0.0,
+        "n_predict": 200
+    },
+
+    "results_dir": "../results"
+}
+
