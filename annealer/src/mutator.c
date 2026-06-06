@@ -13,7 +13,7 @@ static pid_t child_pid  = -1;
 static FILE *to_child   = NULL;
 static FILE *from_child = NULL;
 
-int mutator_init(const char *script_path, int seed)
+int mutator_init(const char *script_path, int seed, const char *seed_file)
 {
     int pipe_in[2], pipe_out[2];
 
@@ -34,7 +34,7 @@ int mutator_init(const char *script_path, int seed)
 
         char seed_str[32];
         snprintf(seed_str, sizeof(seed_str), "%d", seed);
-        execlp("python3", "python3", script_path, "--seed", seed_str, NULL);
+        execlp("python3", "python3", script_path, "--seed", seed_str, "--seed-file", seed_file, NULL);
         perror("[mutator] execlp");
         _exit(1);
     }
