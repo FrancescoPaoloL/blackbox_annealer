@@ -26,6 +26,11 @@
 #define COOLING_RATE   0.95
 #define MAX_STEPS      10000
 #define PLATEAU_THRESH 200
+/* End the run when it has effectively converged: temperature already low
+ * AND no improvement to the best for a stretch. Stops the wasted tail of
+ * identical moves that ran to the step cap before. */
+#define EARLY_STOP_T      0.01
+#define EARLY_STOP_NOIMP  30
 
 /* Misc */
 #define SLEEP_MS   300
@@ -85,10 +90,10 @@ int main(int argc, char *argv[])
     srand((unsigned)time(NULL));
 
     if (guardian_init(GUARDIAN_SCRIPT, EMBEDDING_URL, GUARDIAN_THRESHOLD) != 0) return 1;
-    if (mutator_init(MUTATOR_SCRIPT, MUTATOR_SEED) != 0) return 1;
-
-    const char *seed_path = (argc > 1) ? argv[1] : "../seeds/seed_01.txt";
+    const char *seed_path = (argc > 1) ? argv[1] : "/app/seeds/seed_01.txt";
     if (load_seed(seed_path, current, sizeof(current)) != 0) return 1;
+
+    if (mutator_init(MUTATOR_SCRIPT, MUTATOR_SEED, seed_path) != 0) return 1;
 
     double score = guardian_score(current);
     if (score < 0.0) return 1;
@@ -146,6 +151,17 @@ int main(int argc, char *argv[])
             steps_no_improve = 0;
         } else {
             steps_no_improve++;
+        }
+
+        /* early stop: once the temperature is low, accepting moves barely
+         * explores anything. If we also stop improving the best for a while,
+         * the run is effectively over — end it instead of floating with
+         * identical, pointless moves to the step cap. */
+        if (T < EARLY_STOP_T && steps_no_improve >= EARLY_STOP_NOIMP) {
+            fprintf(stderr, "[annealer] converged at step %d "
+                    "(T=%.4f, no improvement for %d steps) — stopping\n",
+                    step, T, steps_no_improve);
+            break;
         }
 
         /* plateau restart */
