@@ -36,3 +36,11 @@ infra/azure/.terraform.lock.hcl
 
 # custom folders to ignore
 notes.txt
+annealer/annealer
+*.o
+llama-bin/
+results/
+*.txt
+!seeds/*.txt
+*.zip
+
