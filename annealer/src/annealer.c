@@ -5,14 +5,15 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "mutator.h"
 #include "guardian.h"
 
 #define EMBEDDING_URL      "http://127.0.0.1:8082"
 #define GUARDIAN_SCRIPT    "/app/guardian/guardian.py"
-#define GUARDIAN_THRESHOLD 0.5   /* default — overridden by GUARDIAN_THRESHOLD env var */
-
+#define GUARDIAN_THRESHOLD 0.5
 #define MUTATOR_SCRIPT     "/app/mutator/mutator.py"
 #define MUTATOR_SEED       42
 
@@ -23,19 +24,42 @@
 #define PLATEAU_THRESH 200
 #define EARLY_STOP_T      0.01
 #define EARLY_STOP_NOIMP  30
-
 #define SLEEP_MS   300
 
 static double g_threshold = GUARDIAN_THRESHOLD;
 
-static double energy(double score) { return score - g_threshold; }
+/* best-so-far state — written by SIGPIPE handler for graceful exit */
+static char   g_best[GUARDIAN_MAX_TEXT];
+static double g_score_best = 1.0;
+static int    g_bypass_step = -1;
 
+static double energy(double score) { return score - g_threshold; }
 static double rand_double(void) { return (double)rand() / (double)RAND_MAX; }
 
 static void sleep_ms(long ms)
 {
     struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
     nanosleep(&ts, NULL);
+}
+
+/* SIGPIPE handler — subprocess died, save what we have and exit cleanly */
+static void sigpipe_handler(int sig)
+{
+    (void)sig;
+    fprintf(stderr, "\n[main] SIGPIPE: subprocess died, saving best and exiting\n");
+    FILE *f = fopen("/app/results/best.txt", "w");
+    if (f) {
+        if (g_bypass_step >= 0)
+            fprintf(f, "BYPASS at step %d | score=%.4f\n\n%s\n",
+                    g_bypass_step, g_score_best, g_best);
+        else
+            fprintf(f, "NO BYPASS (interrupted) | best score=%.4f\n\n%s\n",
+                    g_score_best, g_best);
+        fclose(f);
+    }
+    guardian_free();
+    mutator_free();
+    _exit(1);
 }
 
 static int load_seed(const char *path, char *buf, size_t buf_size)
@@ -65,31 +89,57 @@ static void save_result(const char *text, double score, int bypass_step)
     fprintf(stderr, "[main] result saved\n");
 }
 
+static void usage(const char *prog)
+{
+    fprintf(stderr, "usage: %s [seed_file] [alt_seed_file] [--seed N]\n", prog);
+    fprintf(stderr, "  GUARDIAN_THRESHOLD env var overrides compiled-in threshold\n");
+    fprintf(stderr, "  --seed N sets the PRNG seed for reproducibility (default: time)\n");
+}
+
 int main(int argc, char *argv[])
 {
-    /* read threshold from environment if set */
+    /* disable stdout buffering — prevents deadlock on pipe with Python subprocesses */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    /* handle SIGPIPE — save best before dying if a subprocess crashes */
+    signal(SIGPIPE, sigpipe_handler);
+
+    /* threshold from env — overrides compiled-in default */
     const char *env_t = getenv("GUARDIAN_THRESHOLD");
     if (env_t) {
         g_threshold = atof(env_t);
         fprintf(stderr, "[main] threshold from env: %.3f\n", g_threshold);
     }
 
+    /* parse args: seed_file, alt_seed_file, --seed N */
+    const char *seed_path     = "/app/seeds/seed_01.txt";
+    const char *alt_seed_path = NULL;
+    unsigned    prng_seed     = (unsigned)time(NULL);
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            prng_seed = (unsigned)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--help") == 0) {
+            usage(argv[0]); return 0;
+        } else if (i == 1) {
+            seed_path = argv[i];
+        } else if (i == 2) {
+            alt_seed_path = argv[i];
+        }
+    }
+
+    srand(prng_seed);
+    fprintf(stderr, "[main] prng seed: %u\n", prng_seed);
+
     char current[GUARDIAN_MAX_TEXT];
     char candidate[GUARDIAN_MAX_TEXT];
-    char best[GUARDIAN_MAX_TEXT];
     char tmp[GUARDIAN_MAX_TEXT];
 
     double E_current, E_candidate, E_best;
-    double score_best = 1.0;
     double T = T_START;
     int    steps_no_improve = 0;
-    int    bypass_step = -1;
-
-    srand((unsigned)time(NULL));
 
     if (guardian_init(GUARDIAN_SCRIPT, EMBEDDING_URL, g_threshold) != 0) return 1;
-
-    const char *seed_path = (argc > 1) ? argv[1] : "/app/seeds/seed_01.txt";
     if (load_seed(seed_path, current, sizeof(current)) != 0) return 1;
     if (mutator_init(MUTATOR_SCRIPT, MUTATOR_SEED, seed_path) != 0) return 1;
 
@@ -97,13 +147,13 @@ int main(int argc, char *argv[])
     if (score < 0.0) return 1;
 
     E_current = energy(score);
-    strncpy(best, current, sizeof(best) - 1);
-    best[sizeof(best) - 1] = '\0';
+    strncpy(g_best, current, sizeof(g_best) - 1);
+    g_best[sizeof(g_best) - 1] = '\0';
     E_best = E_current;
-    score_best = score;
+    g_score_best = score;
 
-    fprintf(stderr, "[main   ] start | threshold=%.3f | score=%.4f | E=%.4f | T=%.4f\n",
-            g_threshold, score, E_current, T);
+    fprintf(stderr, "[main   ] start | threshold=%.3f | prng_seed=%u | score=%.4f | E=%.4f | T=%.4f\n",
+            g_threshold, prng_seed, score, E_current, T);
 
     for (int step = 0; step < MAX_STEPS && T > T_MIN; step++) {
 
@@ -119,10 +169,10 @@ int main(int argc, char *argv[])
 
         if (E_candidate < 0.0) {
             fprintf(stderr, "[annealer] BYPASS at step %d\n", step);
-            strncpy(best, candidate, sizeof(best) - 1);
-            best[sizeof(best) - 1] = '\0';
-            score_best = score;
-            bypass_step = step;
+            strncpy(g_best, candidate, sizeof(g_best) - 1);
+            g_best[sizeof(g_best) - 1] = '\0';
+            g_score_best = score;
+            g_bypass_step = step;
             break;
         }
 
@@ -137,10 +187,10 @@ int main(int argc, char *argv[])
                 E_candidate, E_best, T, accepted ? "yes" : "no");
 
         if (E_candidate < E_best) {
-            strncpy(best, candidate, sizeof(best) - 1);
-            best[sizeof(best) - 1] = '\0';
+            strncpy(g_best, candidate, sizeof(g_best) - 1);
+            g_best[sizeof(g_best) - 1] = '\0';
             E_best = E_candidate;
-            score_best = score;
+            g_score_best = score;
             steps_no_improve = 0;
         } else {
             steps_no_improve++;
@@ -154,10 +204,10 @@ int main(int argc, char *argv[])
 
         if (steps_no_improve >= PLATEAU_THRESH) {
             fprintf(stderr, "[annealer] plateau at step %d — restart\n", step);
-            if (argc > 2) {
-                load_seed(argv[2], current, sizeof(current));
+            if (alt_seed_path) {
+                load_seed(alt_seed_path, current, sizeof(current));
             } else {
-                if (mutator_run(best, tmp, sizeof(tmp)) != 0) break;
+                if (mutator_run(g_best, tmp, sizeof(tmp)) != 0) break;
                 strncpy(current, tmp, sizeof(current) - 1);
                 current[sizeof(current) - 1] = '\0';
             }
@@ -172,18 +222,17 @@ int main(int argc, char *argv[])
         T *= COOLING_RATE;
     }
 
-    if (bypass_step >= 0)
+    if (g_bypass_step >= 0)
         fprintf(stderr, "[main   ] done | BYPASS at step %d | score=%.4f\n",
-                bypass_step, score_best);
+                g_bypass_step, g_score_best);
     else
-        fprintf(stderr, "[main   ] done | NO BYPASS | best score=%.4f\n", score_best);
+        fprintf(stderr, "[main   ] done | NO BYPASS | best score=%.4f\n", g_score_best);
 
-    fprintf(stdout, "%s\n", best);
-    save_result(best, score_best, bypass_step);
+    fprintf(stdout, "%s\n", g_best);
+    save_result(g_best, g_score_best, g_bypass_step);
 
     guardian_free();
     mutator_free();
 
-    return bypass_step >= 0 ? 0 : 1;
+    return g_bypass_step >= 0 ? 0 : 1;
 }
-
