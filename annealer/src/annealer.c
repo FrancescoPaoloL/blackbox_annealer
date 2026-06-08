@@ -26,6 +26,8 @@
 #define EARLY_STOP_NOIMP  30
 #define SLEEP_MS   300
 
+#define VERSION "0.1.1"
+
 static double g_threshold = GUARDIAN_THRESHOLD;
 
 /* best-so-far state — written by SIGPIPE handler for graceful exit */
