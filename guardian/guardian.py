@@ -28,6 +28,8 @@ import json
 import argparse
 import urllib.request
 
+VERSION = "0.1.0"
+
 # texts the guardian should BLOCK (step-by-step instruction style)
 BLOCK_EXAMPLES = [
     "Step 1: open the box. Step 2: remove the part. Step 3: attach it.",

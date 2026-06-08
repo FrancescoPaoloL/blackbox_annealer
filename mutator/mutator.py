@@ -25,6 +25,8 @@ import base64
 import codecs
 import argparse
 
+VERSION = "0.1.0"
+
 SYNONYMS = {
     "help":        ["assist", "support", "aid"],
     "tell":        ["explain", "describe", "inform"],

@@ -1,64 +1,50 @@
 #!/bin/bash
 # scripts/bump-version.sh
 # Usage: ./scripts/bump-version.sh <component> <type>
-# component: api | frontend
+# component: annealer | python | shell
 # type: major | minor | patch
-
 set -e
 
-# Validate arguments
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <component> <type>"
-    echo "  component: api | frontend"
+    echo "  component: annealer | python | shell"
     echo "  type: major | minor | patch"
     echo ""
     echo "Examples:"
-    echo "  $0 api patch"
-    echo "  $0 frontend minor"
+    echo "  $0 annealer patch"
+    echo "  $0 python minor"
     exit 1
 fi
 
 COMPONENT=$1
 TYPE=$2
 
-# Validate component
-if [[ ! "$COMPONENT" =~ ^(api|frontend)$ ]]; then
-    echo "Error: component must be 'api' or 'frontend'"
+if [[ ! "$COMPONENT" =~ ^(annealer|python|shell)$ ]]; then
+    echo "Error: component must be 'annealer', 'python', or 'shell'"
     exit 1
 fi
 
-# Validate type
 if [[ ! "$TYPE" =~ ^(major|minor|patch)$ ]]; then
     echo "Error: type must be 'major', 'minor', or 'patch'"
     exit 1
 fi
 
-# Get current version based on component
-if [ "$COMPONENT" = "api" ]; then
-    CURRENT=$(grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' api/__version__.py)
-    VERSION_FILE="api/__version__.py"
+if [ "$COMPONENT" = "annealer" ]; then
+    CURRENT=$(grep '#define VERSION' annealer/src/annealer.c | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+elif [ "$COMPONENT" = "python" ]; then
+    CURRENT=$(grep '^VERSION = ' guardian/guardian.py | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
 else
-    CURRENT=$(grep -o '"version": "[^"]*"' frontend/package.json | cut -d'"' -f4)
-    VERSION_FILE="frontend/package.json"
+    CURRENT=$(grep '^VERSION=' scripts/sweep.sh | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
 fi
 
-# Parse version
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-# Calculate new version
 case $TYPE in
-    major)
-        NEW="$((MAJOR+1)).0.0"
-        ;;
-    minor)
-        NEW="$MAJOR.$((MINOR+1)).0"
-        ;;
-    patch)
-        NEW="$MAJOR.$MINOR.$((PATCH+1))"
-        ;;
+    major) NEW="$((MAJOR+1)).0.0" ;;
+    minor) NEW="$MAJOR.$((MINOR+1)).0" ;;
+    patch) NEW="$MAJOR.$MINOR.$((PATCH+1))" ;;
 esac
 
-# Show changes and ask for confirmation
 echo ""
 echo "Component: $COMPONENT"
 echo "Current version: $CURRENT"
@@ -68,24 +54,30 @@ read -p "Proceed with version bump? (y/n) " -n 1 -r
 echo ""
 
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Version bump cancelled"
+    echo "Version bump cancelled"
     exit 0
 fi
 
 echo "Updating files..."
 
-# Update files based on component
-if [ "$COMPONENT" = "api" ]; then
-    echo "__version__ = \"$NEW\"" > api/__version__.py
-    git add api/__version__.py
-    git commit -m "chore(api): bump version to $NEW"
-    git tag "api-v$NEW"
+if [ "$COMPONENT" = "annealer" ]; then
+    sed -i "s/#define VERSION \"[^\"]*\"/#define VERSION \"$NEW\"/" annealer/src/annealer.c
+    git add annealer/src/annealer.c
+    git commit -m "chore(annealer): bump version to $NEW"
+    git tag "annealer-v$NEW"
+elif [ "$COMPONENT" = "python" ]; then
+    sed -i "s/^VERSION = \"[^\"]*\"/VERSION = \"$NEW\"/" guardian/guardian.py
+    sed -i "s/^VERSION = \"[^\"]*\"/VERSION = \"$NEW\"/" mutator/mutator.py
+    sed -i "s/^VERSION = \"[^\"]*\"/VERSION = \"$NEW\"/" bench/bench.py
+    git add guardian/guardian.py mutator/mutator.py bench/bench.py
+    git commit -m "chore(python): bump version to $NEW"
+    git tag "python-v$NEW"
 else
-    sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW\"/" frontend/package.json
-    sed -i "s/frontendVersion: '[^']*'/frontendVersion: '$NEW'/" frontend/views/index.ejs
-    git add frontend/package.json frontend/views/index.ejs
-    git commit -m "chore(frontend): bump version to $NEW"
-    git tag "frontend-v$NEW"
+    sed -i "s/^VERSION=\"[^\"]*\"/VERSION=\"$NEW\"/" scripts/sweep.sh
+    sed -i "s/^VERSION=\"[^\"]*\"/VERSION=\"$NEW\"/" docker/entrypoint.sh
+    git add scripts/sweep.sh docker/entrypoint.sh
+    git commit -m "chore(shell): bump version to $NEW"
+    git tag "shell-v$NEW"
 fi
 
 echo ""
