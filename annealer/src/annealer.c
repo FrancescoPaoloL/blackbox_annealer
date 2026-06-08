@@ -34,6 +34,7 @@
 
 /* Misc */
 #define SLEEP_MS   300
+#define VERSION "0.1.2"
 static double g_threshold = GUARDIAN_THRESHOLD;
 
 /* Energy = score - threshold. Negative = bypass achieved. */
