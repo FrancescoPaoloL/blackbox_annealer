@@ -187,3 +187,7 @@ MEEA (arXiv:2512.18755) attacks the boundary on the temporal axis using progress
 - Numerical Recipes in C, Press et al., chapter 10, for the annealing algorithm
 - Python 3, stdlib only
 
+## Connect with me
+
+[LinkedIn](https://www.linkedin.com/in/francescopl/) · [Kaggle](https://www.kaggle.com/francescopaolol)
+
